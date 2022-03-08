@@ -1,0 +1,227 @@
+---
+title: "Structural Equation Modeling"
+author: "Mario Severo"
+date: "22 december 2020"
+output: html_document
+---
+
+# SEM Tutorial 
+
+This is a tutorial for performing **Structural Equation Modeling** (SEM) in R. This particular tutorial is lifted from Chapter 10 of Chapman, C. & Feit, E. M. (2015). *R for Marketing Research and Analytics*. London: Springer. 
+
+> SEM is a causal inference method, which relates to a family of related procedures. 
+
+It is used to test a hypothesized structural regression model by creating a *graphical path diagram* of inﬂuences of variables and then estimating the relationship magnitude for each path in the model (Chapman & Feit, 2015). SEM combines a *measurement model* (i.e., hypothesized linkage between latent and observable variables), and a *path/structural model* (i.e., hypothesized set of relations between the latent variables; Kim et al., 2016). *Latent* vaiables correspond to the **hypothetical construct** or explanatory entities presumed to reflect a continuum that is not directly observable (e.g., *intelligence*, *attitude*, *personality*, etc), while *observed* variables refer to variables for which you have collected scores and entered in a data file (Kline, 2016). SEM has also been alternatively called **covariance structure analysis**, **covariance structure modelling**, and **analysis of covariance structures** (Kline, 2016). 
+
+```{r load packages, include=FALSE}
+pacman::p_load(pacman,lavaan, semTools, semPlot, semPLS)
+```
+
+## Covariance-based structural equation model (CB-SEM)
+CB-SEM  attempt to account for as much of the total covariance in the data as possible, among all observed and latent variables. It requires that a data set complies with relatively strict assumptions about data distributions (continuous data, normally distributed residuals), the number of indicators per factor (generally three or more), reliability of indicators, and sample size (some authorities recommend several hundred, although it is possible that samples of N = 100 or even N = 50 may be adequate when measures are very reliable; Chapman & Feit, 2015;Iacobucci, 2009).
+
+### Scale assessment using Confirmatory factor analysis (CFA)
+
+#### PIES
+To demonstrate, the **Product Involvement and Engagement Scale (PIES)** will be used (Chapman et al., 2015). This survey scale reﬂects a model in which *product involvement* is a **hierarchical construct** comprising three factors: general involvement with a product category (*general*), involvement with the choices and features of the product (*feature*), and involvement with the category in terms of personal image (*image*). Thus, the scale is composed of three subscales relating to the indicated lower-level latent variables.  
+
+Steps:
+
+1. Load dataset
+
+We load the simulated dataset from 3600 respondents of the PIES
+```{r load dataset 1, echo=FALSE}
+piesSimData <- read.csv("http://goo.gl/yT0XwJ")
+summary(piesSimData)
+```
+
+2. Specify structural model
+
+Next, we specify the *structural model* - the model that is fitted to the data and whose structure is being assessed.
+```{r structural model 1}
+piesModel <- "General =~ i1 + i2 + i3
+              Feature =~ i4 + i5 + i6 + i7
+              Image =~ i8 + i9 + i10 + i11
+              PIES =~ General + Feature + Image"
+```
+
+3. confirmatory factor analysis
+
+Then, we perform a CFA. 
+```{r model fit 1}
+pies.fit <- cfa(piesModel, data=piesSimData)
+summary(pies.fit, fit.measures=TRUE)
+```
+
+4. Plot model
+
+Next, we plot the ﬁnal model with ﬁtted parameter estimates.
+```{r SEM plot 1, echo=FALSE}
+semPaths(pies.fit, what="est", fade=FALSE, residuals=FALSE,
+         edge.label.cex=0.75)
+```
+
+5. Test model against alternatives
+
+Finally, we have to establish that the proposed model ﬁts *better* than a reasonable alternative model. Hence, testing the former against the latter is a necessary step. In this example, we test the PIES model (PIES 3+1) against two other alternatives: 1) PIES 1, a single factor alternative where one underlying involvement factor manifests in all items and 2) PIES 3, an uncorrelated three-factor model, where three independent factors are manifest in the three respective sets of items.  PIES 1 is a simpler model that proposes product involvement to be a single latent factor, while PIES 3  omits the top level, overall factor from the hierarchy and focuses on the three subfactors, asking whether they are better conceived as being separate instead of relating to a hierarchical model. 
+
+```{r alternative model 1}
+# PIES 1 Model
+piesModelNH1 <- "PIES =~ i1 + i2 + i3 + i4 + i5 + i6 +
+                  i7 + i8 + i9 + i10 + i11"
+
+# Test PIES 1 model 
+pies.fit.NH1 <- cfa(piesModelNH1, data=piesSimData)
+
+
+
+# PIES 3 Model
+piesModelNH3 <- "General =~ i1 + i2 + i3
+                 Feature =~ i4 + i5 + i6 + i7
+                 Image =~ i8 + i9 + i10 + i11
+                 General ~~ 0.1*Feature
+                 General ~~ 0.1*Image
+                 Feature ~~ 0.1*Image"
+
+# Test PIES 3 model 
+pies.fit.NH3 <- cfa(piesModelNH3, data=piesSimData)
+
+
+# Run comparison test of the three models
+compareFit(pies.fit.NH1, pies.fit.NH3, pies.fit)
+```
+
+Based on the results, the proposed three-factor hierarchical model (PIES 3 + 1) fit the (simulated) data best based on the following parameters: CFI =
+0.975, RMSEA = 0.041. It was also significantly different from the alternative three-factor non-hierarchical model (PIES 3). The alternative one-factor model (PIES 1) showed a poor data fit. Overall, we can say that the three-factor hierarchical model (PIES 3 + 1) was an excellent ﬁt in itself and was better than two reasonable alternative models. 
+
+> The result suggests that product involvement is not a unitary, single factor, but rather, a hierarchical one that assesses overall product interest alongside measures of feature and image involvement.    
+
+
+#### General model for SEM: The Repeat Purchase Model
+Here, we consider a more general form of structural models, where latent constructs may inﬂuence one another in more complex ways. For illustration, we look into Iacobucci's study (2009) on intention to repeat purchase. The data consisted of responses to 15 satisfaction items, where there were three items each for factors of Quality, Cost (fair pricing), Value, Customer Satisfaction (CSat), and Repeat purchase intention.The primary aim is to test the hypothesis that perception of cost is associated with both perception of value and intent to repurchase. 
+
+Steps: 
+
+1. Define the structural model to be tested
+
+```{r structural model 2}
+satModel <- "Quality =~ CSat + Value + q1 + q2 + q3 + 0*Cost
+             Cost =~ Value + Repeat + c1 + c2 + c3
+             Value =~ CSat + v1 + v2 + v3
+             CSat =~ Repeat + cs1 + cs2 + cs3
+             Repeat =~ r1 + r2 + r3"
+```
+
+
+2. Create simulated data that we use for illustration and debugging
+
+```{r load dataset 2}
+satSimData <- read.csv("http://goo.gl/MhghRq")
+summary(satSimData)
+```
+
+3. Fit the model to the data
+
+```{r model fit 2}
+sat.fit <- sem(satModel, data= satSimData, std.lv=TRUE)
+summary(sat.fit, fit.measures=TRUE)
+
+# plot model
+semPaths(sat.fit, what="est", fade=FALSE, residuals=FALSE,
+         layout="tree", structural=TRUE, nCharNodes=7, edge.label.cex=1)
+```
+
+4. Compare the model to a simpler, alternative model
+
+```{r alternative model 2}
+satAltModel <- "Quality =~ CSat + q1 + q2 + q3 + 0*Cost
+                Cost =~ Value + c1 + c2 + c3
+                Value =~ CSat + v1 + v2 + v3
+                CSat =~ Repeat + cs1 + cs2 + cs3
+                Repeat =~ r1 + r2 + r3"
+
+# Fit model into the simulated data 
+satAlt.fit <- sem(satAltModel, data=satSimData, std.lv=TRUE)
+
+# Run comparison test
+compareFit(sat.fit, satAlt.fit, nested=TRUE)
+```
+
+Overall, we can conclude that the proposed model shows good ﬁt to the (simulated) data. Morever, when compared to a simpler alternative model, the proposed model is not only an arbitrary good fit to the data, but also the preferable one. There is a more complex relationship among the latent variables than a unitary associations among them. 
+
+
+## Partial least squares structural equation model (PLS-SEM)
+PLS-SEM is an alternative approach when data do not comply with the assumptions of CB-SEM or come from a modest sample size with potentially less reliable indicators. While PLS-SEM does not allow one to say much about model ﬁt or comparative strength, it still provides useful estimates of model coefficients. 
+
+
+#### PLS-SEM: The Repeat Purchase Model
+Using the same Repeat Purchase Model (see CB-SEM model 2; Iacobucci, 2009), we create a new dataset with sample of N=50 from the original simulated data. 
+
+```{r}
+pacman::p_load(car, psych) 
+
+set.seed(90704)
+satSimData2 <- satSimData[sample(nrow(satSimData),50),]
+describe(satSimData2)
+
+#sat.fit2 <- sem(satModel, data= satSimData2, std.lv=TRUE)
+#summary(sat.fit2, fit.measures=TRUE)
+```
+
+We use the package semPLS for PLS-SEM. Unlike, Lavaan, semPLS separates defining the measurement model from the structural one. Thus, ﬁrst step is to deﬁne a measurement model that links underlying latent variables to their observed manifest variables such as survey items, and then to deﬁne a structural model that links latent variables to one another. The package uses a *matrix* format (unlike lavaan which uses a *formula* syntax) to define relationships among variables. 
+
+```{r PLS measurement model}
+satPLSmm <- matrix(c(
+              "Quality", "q1",
+              "Quality", "q2",
+              "Quality", "q3",
+              "Cost", "c1",
+              "Cost", "c2",
+              "Cost", "c3",
+              "Value", "v1",
+              "Value", "v2",
+              "Value", "v3",
+              "CSat", "cs1",
+              "CSat", "cs2",
+              "CSat", "cs3",
+              "Repeat", "r1",
+              "Repeat", "r2",
+              "Repeat", "r3" ), ncol=2, byrow=TRUE)
+```
+
+
+Now, we define the structural model in matrix format
+```{r PLS structural model}
+satPLSsm <- matrix(c(
+              "Quality", "CSat",
+              "Quality", "Value",
+              "Cost", "Value",
+              "Cost", "Repeat",
+              "Value", "CSat",
+              "CSat", "Repeat"), ncol=2, byrow=TRUE) 
+```
+
+
+Then, we fit the model into the data
+```{r PLS model fit}
+satPLS.mod <- plsm(data=satSimData2, strucmod=satPLSsm, measuremod=satPLSmm)
+satPLS.fit <- sempls(model=satPLS.mod, data=satSimData2)
+```
+
+Next, we inspect the estimated factor structure, i.e., the ﬁt between the latent variables and the manifest observations (items)
+```{r estimated factor structure}
+plsLoadings(satPLS.fit)
+```
+
+Then, we examine the structural coefﬁcients between latent variables
+
+```{r structural coefﬁcient}
+pathCoeff(satPLS.fit)
+```
+
+
+References: 
+
+* Chapman, C. & Feit, E. M. (2015). *R for Marketing Research and Analytics*. London: Springer.
+* Kim, S., Sturman, E., & Kim, E. S. (2015). Structural Equation Modeling: Principles, Processes, and Practices. In K. D. Strang. (ed.), *The Palgrave Handbook of Research Design in Business and Management*, New York: Palgrave Macmillan US.
+* Kline, R. B. (2016). *Principles and Practice of Structural Equation Modeling*. New York: The Guildford Press. 
